@@ -1,9 +1,15 @@
 Project setting
 ```bash
-1. npm i
+$ npm i
 ```
 
 Run tests
 ```bash
-2. npx hardhat test
+$ npx hardhat test
 ```
+
+Generate coverage report
+```bash
+SOLIDITY_COVERAGE=true npx hardhat coverage
+```
+Then, open .coverage/contracts/index.html
