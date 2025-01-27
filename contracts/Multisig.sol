@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0
-pragma solidity ^0.8.0;
+pragma solidity =0.8.24;
 
 contract Multisig {
     enum Operation {
@@ -43,8 +43,6 @@ contract Multisig {
 
     address internal constant SENTINEL_OWNERS = address(0x1);
 
-    // mapping to keep track of all message hashes that have been approved by ALL REQUIRED owners
-    mapping(bytes32 => uint256) public signedMessages;
     // mapping to keep track of all hashes (message or transaction) that have been approved by ANY owners
     mapping(address => mapping(bytes32 => uint256)) public approvedHashes;
 
@@ -141,24 +139,22 @@ contract Multisig {
     /**
      * @notice checks whether the signature provided is valid for the provided data and hash. Reverts otherwise
      * @param dataHash hash of the data (could be either a message hash or transaction hash)
-     * @param data that should be signed (this is passed to an external validator contract)
      */
-    function checkApprovals(bytes32 dataHash, bytes memory data) public view {
+    function checkApprovals(bytes32 dataHash) public view {
         // load threshold to avoid multiple storage loads
         uint256 _threshold = threshold;
         // check that a threshold is set
         require(_threshold > 0, "Threshold is not set");
-        checkNApprovals(dataHash, data, _threshold);
+        checkNApprovals(dataHash, _threshold);
     }
 
     /**
      * @notice checks whether the signature provided is valid for the provided data and hash. Reverts otherwise
      * @dev since the EIP-1271 does an external call, be mindful of reentrancy attacks
      * @param dataHash hash of the data (could be either a message hash or transaction hash)
-     * @param data that should be signed (this is passed to an external validator contract)
      * @param requiredSignatures amount of required valid signatures
      */
-    function checkNApprovals(bytes32 dataHash, bytes memory data, uint256 requiredSignatures) public view {
+    function checkNApprovals(bytes32 dataHash, uint256 requiredSignatures) public view {
         uint256 count = 0;
         address currentOwner = owners[SENTINEL_OWNERS];
         while (currentOwner != SENTINEL_OWNERS) {
@@ -257,7 +253,8 @@ contract Multisig {
         if (gasToken == address(0)) {
             // for ETH we will only adjust the gas price to not be higher than the actual used gas price
             payment = (gasUsed + baseGas) * (gasPrice < tx.gasprice ? gasPrice : tx.gasprice);
-            require(receiver.send(payment), "Error when paying a transaction in native currency");
+            (bool sent, ) = receiver.call{value: payment}("");
+            require(sent, "Error when paying a transaction in native currency");
         } else {
             payment = (gasUsed + baseGas) * (gasPrice);
             require(transferToken(gasToken, receiver, payment), "Error when paying a transaction in token");
@@ -274,7 +271,7 @@ contract Multisig {
      * @return transferred Returns true if the transfer was successful
      */
     function transferToken(address token, address receiver, uint256 amount) internal returns (bool transferred) {
-        // 0xa9059cbb - keccack("transfer(address,uint256)")
+        // 0xa9059cbb - keccak256("transfer(address,uint256)")
         bytes memory data = abi.encodeWithSelector(0xa9059cbb, receiver, amount);
         // solhint-disable-next-line no-inline-assembly
         assembly {
@@ -291,34 +288,6 @@ contract Multisig {
             default {
                 transferred := 0
             }
-        }
-    }
-
-    /**
-     * @notice splits signature bytes into `uint8 v, bytes32 r, bytes32 s`
-     * @dev make sure to perform a bounds check for @param pos, to avoid out of bounds access on @param signatures
-     *      the signature format is a compact form of {bytes32 r}{bytes32 s}{uint8 v}
-     *      compact means uint8 is not padded to 32 bytes
-     * @param pos which signature to read
-     *            a prior bounds check of this parameter should be performed, to avoid out of bounds access
-     * @param signatures concatenated {r, s, v} signatures
-     * @return v Recovery ID or Safe signature type
-     * @return r Output value r of the signature
-     * @return s Output value s of the signature
-     */
-    function signatureSplit(bytes memory signatures, uint256 pos) internal pure returns (uint8 v, bytes32 r, bytes32 s) {
-        // solhint-disable-next-line no-inline-assembly
-        assembly {
-            let signaturePos := mul(0x41, pos)
-            r := mload(add(signatures, add(signaturePos, 0x20)))
-            s := mload(add(signatures, add(signaturePos, 0x40)))
-            /**
-             * here we are loading the last 32 bytes, including 31 bytes
-             * of 's'. There is no 'mload8' to do this
-             * 'byte' is not working due to the Solidity parser, so lets
-             * use the second best option, 'and'
-             */
-            v := and(mload(add(signatures, add(signaturePos, 0x41))), 0xff)
         }
     }
 
@@ -390,6 +359,7 @@ contract Multisig {
         address gasToken,
         address payable refundReceiver
     ) public payable virtual returns (bool success) {
+        require(isOwner(msg.sender), "Executor must be an owner");
         bytes32 txHash;
         // use scope here to limit variable lifetime and prevent `stack too deep` errors
         {
@@ -411,7 +381,7 @@ contract Multisig {
             // increase nonce and execute transaction.
             nonce++;
             txHash = keccak256(txHashData);
-            checkApprovals(txHash, txHashData);
+            checkApprovals(txHash);
         }
         // we require some gas to emit the events (at least 2500) after the execution and some to perform code until the execution (500)
         // we also include the 1/64 in the check that is not send along with a call to counteract potential shortings because of EIP-150
@@ -454,7 +424,7 @@ contract Multisig {
         address payable refundReceiver,
         bytes32 hashToApprove
     ) external {
-        require(owners[msg.sender] != address(0), "Now owner");
+        require(owners[msg.sender] != address(0), "Not owner");
 
         bytes32 txHash = getTransactionHash(
             to,

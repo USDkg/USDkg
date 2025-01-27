@@ -35,7 +35,7 @@ If the fee value is not zero, it will be deducted from the transferred amount.
 
 #### Additional requirements for calling the function:
 - The protocol has not been blocked by the `pause` function
-- The sender is not blacklisted
+- The sender and spender are not blacklisted
 - User should have enough approval from the spender's address
 
 ### Function `approve`

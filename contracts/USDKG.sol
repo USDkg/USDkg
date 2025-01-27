@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0
-pragma solidity ^0.8.0;
+pragma solidity =0.8.24;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
@@ -43,6 +43,7 @@ contract USDKG is IERC20 {
     event Params(uint256 feeBasisPoints);
 
     constructor (address _owner, address _compliance) {
+        require(_owner != address(0) && _compliance != address(0), "Owner and Compliance must be non zero addresses");
         owner = _owner;
         compliance = _compliance;
         _totalSupply = 0;
@@ -60,7 +61,7 @@ contract USDKG is IERC20 {
     }
 
     /**
-      * @dev Throws if called by any account other than the owner.
+      * @dev Throws if called by any account other than the compliance.
       */
     modifier onlyCompliance() {
         require(msg.sender == compliance, "not compliance");
@@ -119,7 +120,7 @@ contract USDKG is IERC20 {
     * @param _to address The address which you want to transfer to
     * @param _value uint256 the amount of tokens to be transferred
     */
-    function transferFrom(address _from, address _to, uint256 _value) public whenNotPaused notBlackListed(_from) returns (bool) {
+    function transferFrom(address _from, address _to, uint256 _value) public whenNotPaused notBlackListed(_from) notBlackListed(msg.sender) returns (bool) {
         uint256 _allowance = allowed[_from][msg.sender];
 
         // check is not needed because sub(_allowance, _value) will already throw if this condition is not met
@@ -215,7 +216,7 @@ contract USDKG is IERC20 {
 
     function setParams(uint256 newBasisPoints) public onlyOwner {
         // ensure transparency by hardcoding limit beyond which fees can never be added
-        require(newBasisPoints < MAX_BASIS_POINTS, "basis points should be less then MAX_BASIS_POINTS");
+        require(newBasisPoints <= MAX_BASIS_POINTS, "basis points should be less then MAX_BASIS_POINTS");
 
         basisPointsRate = newBasisPoints;
 
@@ -245,7 +246,6 @@ contract USDKG is IERC20 {
         return allowed[_owner][_spender];
     }
 
-    // getters to allow the same blacklist to be used also by other contracts (including upgraded Tether)
     function getBlackListStatus(address _maker) external view returns (bool) {
         return isBlackListed[_maker];
     }
